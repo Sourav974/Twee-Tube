@@ -5,51 +5,161 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
+// Create a Tweet
 const createTweet = asyncHandler(async (req, res) => {
   //TODO: create tweet
   const { content } = req.body;
 
-  const tweet = await Tweet.create({ content });
+  if (!content) throw new ApiError(400, "content is required");
+
+  const tweet = await Tweet.create({
+    content,
+    owner: req.user._id,
+  });
+
+  if (!tweet)
+    throw new ApiError(500, "failed to create tweet please try again");
 
   res
     .status(201)
     .json(new ApiResponse(201, tweet, "Tweet succesffuly created!"));
 });
 
+// Get user tweets
 const getUserTweets = asyncHandler(async (req, res) => {
   // TODO: get user tweets
   const { userId } = req.params;
-  console.log("userId", userId);
 
-  const tweet = await Tweet.findById(userId);
+  if (!isValidObjectId(userId)) throw new ApiError(400, "Invalid Id");
 
-  res
+  const tweets = await Tweet.aggregate([
+    {
+      $match: {
+        owner: new mongoose.Types.ObjectId(userId),
+      },
+    },
+    {
+      $lookup: {
+        from: "users",
+        localField: "owner",
+        foreignField: "_id",
+        as: "ownerDetails",
+        pipeline: [
+          {
+            $project: {
+              username: 1,
+              "avatar.url": 1,
+            },
+          },
+        ],
+      },
+    },
+    {
+      $lookup: {
+        from: "likes",
+        localField: "_id",
+        foreignField: "tweet",
+        as: "likeDetails",
+        pipeline: [
+          {
+            $project: {
+              likedBy: 1,
+            },
+          },
+        ],
+      },
+    },
+    {
+      $addFields: {
+        likesCount: {
+          $size: "$likeDetails",
+        },
+        ownerDetails: {
+          $first: "$ownerDetails",
+        },
+        isLiked: {
+          $cond: {
+            if: { $in: [req.user?._id, "$likeDetails.likedBy"] },
+            then: true,
+            else: false,
+          },
+        },
+      },
+    },
+    {
+      $sort: {
+        createdAt: -1,
+      },
+    },
+    {
+      $project: {
+        content: 1,
+        ownerDetails: 1,
+        likesCount: 1,
+        createdAt: 1,
+        isLiked: 1,
+      },
+    },
+  ]);
+
+  return res
     .status(200)
-    .json(new ApiResponse(200, tweet, "Successfully fetched tweet!"));
+    .json(new ApiResponse(200, tweets, "Tweets fetched successfully"));
 });
 
+// Update tweet
 const updateTweet = asyncHandler(async (req, res) => {
   //TODO: update tweet
   const { tweetId } = req.params;
-  const content = req.body;
+  const { content } = req.body;
 
-  const tweet = await Tweet.findByIdAndUpdate(
+  if (!isValidObjectId(tweetId)) throw new ApiError(400, "invalid Id");
+
+  if (!content) throw new ApiError(400, "Content is required");
+
+  const tweet = await Tweet.findById(tweetId);
+
+  if (!tweet) throw new ApiError(404, "Tweet not found");
+
+  console.log("tweet owner", tweet?.owner.toString());
+
+  if (tweet?.owner.toString() !== req.user?._id.toString())
+    throw new ApiError(400, "only owner can edit thier tweet");
+
+  const newTweet = await Tweet.findByIdAndUpdate(
+    tweetId,
     {
-        tweetId,
       $set: {
-        content: content,
+        content,
       },
     },
-    { new: true }
+    {
+      new: true,
+    }
   );
 
   res
     .status(200)
-    .json(new ApiResponse(200, tweet, "Tweet has been successfully updated!"));
+    .json(new ApiResponse(200, newTweet, "Successfully fetched tweet!"));
 });
 
+// Delete tweet
 const deleteTweet = asyncHandler(async (req, res) => {
   //TODO: delete tweet
+  const { tweetId } = req.params;
+
+  if (!isValidObjectId(tweetId)) throw new ApiError(400, "Invalid Id");
+
+  const tweet = await Tweet.findById(tweetId);
+
+  if (!tweet) throw new ApiError(404, "Tweet not found");
+
+  if (tweet?.owner.toString() !== req.user?._id.toString())
+    throw new ApiError(400, "only owner can delete thier tweet");
+
+  await Tweet.findByIdAndDelete(tweetId);
+
+  res.status(200).json(200, {}, "Tweet deleted successfully");
 });
 
 export { createTweet, getUserTweets, updateTweet, deleteTweet };

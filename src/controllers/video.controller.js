@@ -22,7 +22,7 @@ const getAllVideos = asyncHandler(async (req, res) => {
   if (query) {
     pipeline.push({
       $search: {
-        index: "search-index",
+        index: "search-videos",
         text: {
           query: query,
           text: [title, description],
@@ -30,6 +30,8 @@ const getAllVideos = asyncHandler(async (req, res) => {
       },
     });
   }
+
+  console.log("pipeline 1", pipeline);
 
   if (userId) {
     if (!isValidObjectId(userId)) throw new ApiError(400, "Invalid id");
@@ -83,6 +85,8 @@ const getAllVideos = asyncHandler(async (req, res) => {
     page: parseInt(page, 10),
     limit: parseInt(limit, 10),
   };
+
+  console.log("videoAggregate", videoAggregate);
 
   const video = await Video.aggregatePaginate(videoAggregate, options);
 
